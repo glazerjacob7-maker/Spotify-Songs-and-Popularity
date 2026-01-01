@@ -1,0 +1,1 @@
+Analyzed Spotify song popularity using R by modeling popularity as a function of audio features (e.g., danceability, energy, tempo). Built and refined multiple regression models, addressed multicollinearity, and interpreted coefficients to evaluate which musical attributes are meaningfully associated with popularity.
