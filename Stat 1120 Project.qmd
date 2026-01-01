@@ -1,0 +1,519 @@
+---
+title: "Spotify Songs and Popularity"
+format: pdf
+editor: visual
+---
+
+## Introduction
+
+What makes a song popular on Spotify? In an age where streaming platforms have transformed the way people consume music, this question holds growing significance for artists, producers, and music marketers. The goal of this project is to investigate which audio features of a song—such as danceability, valence, energy, or tempo—are associated with higher levels of popularity on Spotify. I define popularity as a numeric score from 0 to 100, based on Spotify’s internal ranking algorithm.
+
+My primary objective is prediction: I aim to model the outcome variable, `track_popularity`, using a combination of quantitative audio features available in the data set. While this project is not designed to make claims of causality, the results could generate hypotheses about the types of musical characteristics that tend to perform well with streaming audiences. A successful model would provide practical insights for music industry stakeholders seeking to optimize song features for audience engagement.
+
+```{r setup, include=FALSE}
+# Hide code by default
+knitr::opts_chunk$set(echo = FALSE)
+
+# Load essential libraries
+library(tidyverse)
+library(GGally)
+library(tidytuesdayR)
+
+# Load dataset from TidyTuesday and also via direct URL
+tt_data <- tidytuesdayR::tt_load("2020-01-21")
+spotify <- tt_data$spotify_songs
+
+# Backup load (in case TidyTuesday fails)
+spotify_songs <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-01-21/spotify_songs.csv")
+
+# Reassign just to be safe and consistent
+spotify <- spotify_songs
+
+# Preview the dataset
+glimpse(spotify)
+summary(spotify)
+```
+
+```{r}
+# load all apropriate models without displaying anything
+
+# original model
+
+# Run the full linear regression model
+full_model <- lm(track_popularity ~ danceability + energy + loudness + speechiness +
+                   acousticness + instrumentalness + liveness + valence + tempo + duration_ms,
+                 data = spotify_songs)
+
+# Extract just the Adjusted R-squared value
+adj_r_squared <- summary(full_model)$adj.r.squared
+cat("Adjusted R-squared:", round(adj_r_squared, 4), "\n")
+
+{r}
+
+# Create a transformed version of the dataset
+spotify_transformed <- spotify_songs %>%
+  mutate(
+    log_speechiness = log1p(speechiness),
+    log_instrumentalness = log1p(instrumentalness),
+    log_duration_ms = log1p(duration_ms)
+  )
+
+# Fit a regression model using the transformed variables
+log_model <- lm(track_popularity ~ danceability + energy + loudness +
+                  log_speechiness + acousticness + log_instrumentalness +
+                  liveness + valence + tempo + log_duration_ms,
+                data = spotify_transformed)
+
+# Load libraries
+library(car)
+library(broom)
+
+# Run full regression model using log-transformed data
+model_full <- lm(track_popularity ~ danceability + energy + loudness +
+                  log_speechiness + acousticness + log_instrumentalness +
+                  liveness + valence + tempo + log_duration_ms,
+                data = spotify_transformed)
+```
+
+## Variable Selection
+
+```{r}
+# Stepwise variable selection using AIC
+model_step <- step(
+  lm(track_popularity ~ danceability + energy + loudness + speechiness +
+       acousticness + instrumentalness + liveness + valence + tempo +
+       duration_ms + key + mode,
+     data = spotify),
+  direction = "both",
+  trace = FALSE
+)
+
+# Display summary of selected model
+summary(model_step)
+
+# Generate predictions
+predicted <- predict(model_step, newdata = spotify)
+actual <- spotify$track_popularity
+
+# Plot predicted vs. actual values
+plot(predicted, actual,
+     xlab = "Predicted Popularity",
+     ylab = "Actual Popularity",
+     main = "Predicted vs. Actual Popularity")
+abline(a = 0, b = 1, col = "red")
+
+# Calculate RMSE
+rmse <- sqrt(mean((predicted - actual)^2))
+rmse
+```
+
+Because this project focuses on predicting track popularity, I conducted variable selection using stepwise regression with Akaike Information Criterion (AIC) as the selection criterion. Starting from the full model containing all available predictors, the algorithm iteratively adds or removes variables to minimize AIC and identify a more efficient model. The final selected model retains the following variables: danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo, duration_ms, key, and mode.
+
+## Violations of Linearity
+
+```{r}
+
+# Calculate residuals and fitted values
+residuals <- resid(model_step)
+fitted <- fitted(model_step)
+
+# Create residual plot
+plot(fitted, residuals,
+     xlab = "Fitted (Predicted) Values",
+     ylab = "Residuals",
+     main = "Residuals vs Fitted Values",
+     pch = 20, col = "steelblue")
+abline(h = 0, col = "red", lwd = 2)
+```
+
+I created a residual plot to assess whether my regression model met the linearity and constant variance assumptions. In the plot, the residuals were not randomly scattered around the zero line; instead, they formed a wedge-shaped pattern, with greater spread at lower fitted values and narrower spread at higher fitted values. This pattern suggests the presence of heteroskedasticity — where the variance of the residuals is not constant across levels of the predicted outcome. This violates one of the core assumptions of linear regression and indicates that the model's predictive error is not evenly distributed.
+
+To address this issue, I log-transformed certain right-skewed predictor variables, such as `speechiness` and `duration_ms`. These variables exhibited long tails and increasing variance, which often lead to non-linearity and unequal error spread. Log transformation compresses the range of large values and stabilizes variance, making the relationship between the predictor and the outcome more linear.
+
+While this improved the model fit, the residual plot still shows some signs of heteroskedasticity, suggesting that additional non-linear patterns or omitted variables may still be influencing the model's behavior. This limitation highlights the potential need for more flexible modeling techniques beyond standard linear regression for my work.
+
+## Full Regression Model
+
+```{r}
+
+# Load libraries
+library(car)
+library(broom)
+
+# Run full regression model using log-transformed data
+model_full <- lm(track_popularity ~ danceability + energy + loudness +
+                  log_speechiness + acousticness + log_instrumentalness +
+                  liveness + valence + tempo + log_duration_ms,
+                data = spotify_transformed)
+
+# Display model summary
+summary(model_full)
+```
+
+The full linear regression model was used to predict `track_popularity` from a set of audio features, including log-transformed versions of skewed variables. The model produced an adjusted R² of 0.070, indicating that these predictors explain only about 7% of the variance in popularity — a weak level of explanatory power. Nonetheless, several predictors were statistically significant at the 0.001 level, including danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo, and duration_ms.
+
+Among these, danceability, loudness, acousticness, valence, and tempo had positive coefficients, suggesting that more rhythmically engaging, louder, acoustically rich, emotionally positive, and faster tracks are associated with slightly higher popularity scores. In contrast, energy, speechiness, instrumentalness, liveness, and duration_ms were negatively associated with popularity. These results align with some intuitive expectations — for example, tracks with high instrumentalness or long durations tend to be less mainstream.
+
+I also generated predicted popularity values and compared them to actual values to test the model. The root mean squared error (RMSE) was approximately 24.066, indicating that, on average, the model’s predictions differ from the actual track popularity scores by about 24 points on a 0–100 scale. This is a substantial error relative to the possible range of the outcome, and it suggests that the model is not capable of making precise predictions. A scatterplot of predicted vs. actual values shows a wide dispersion around the identity line, with no clear clustering along the ideal diagonal — further reinforcing the model’s weak predictive performance. Although some audio features, such as danceability and loudness, show statistically significant relationships with popularity, the low RMSE and adjusted R² make it clear that these features explain only a small fraction of the variation. In practice, this implies that track popularity is likely driven by factors outside the scope of this dataset — including artist reputation, marketing exposure, playlist placement, and social media influence — which are not captured in the available audio metadata.
+
+## Limitations
+
+One key limitation of this analysis is that popularity is partially subjective and heavily influenced by external factors that are not included in the data set. Variables such as artist fame, label marketing, playlist placement, and social media exposure are likely to drive a significant portion of a track’s popularity, but none of these factors are available in the audio feature data. As a result, the model’s predictive accuracy is limited, which is reflected in the low adjusted R² and high RMSE.
+
+The model also does not account for time trends or genre effects, both of which could influence popularity. For instance, the popularity of certain musical characteristics may vary by release year or genre, but because the data set does not include time stamps or genre labels, these potential influences could not be analyzed or controlled for.
+
+Taken together, the findings suggest that who you are may matter more than the specific characteristics of the music you produce. While some features like danceability and loudness are statistically associated with popularity, their predictive power is weak overall, reinforcing the idea that external visibility and context often matter more than raw audio qualities.
+
+## Conclusion
+
+In this project, I used linear regression to explore how audio features of songs relate to track popularity on Spotify. After cleaning the data and applying log transformations to certain variables (speechiness, instrumentalness, duration_ms) to correct for their heavy right skew and to stabilize variance, I fit a full model and used stepwise AIC selection to refine it. While several predictors—such as danceability, loudness, and instrumentalness—showed statistically significant relationships with popularity, the model explained only a small portion of the overall variance. A high RMSE and signs of heteroskedasticity in the residuals indicate that audio features alone are not strong predictors of popularity. These results suggest that external factors such as artist visibility, marketing, and playlist exposure likely play a more influential role than track-level audio characteristics in determining a song’s success, meaning factors beyond measurable components mostly control whether it will become a hit.
+
+## Additional Work:
+
+## Data Description
+
+This analysis will use the Spotify Songs Dataset from Tidy Tuesday. The data were collected from Spotify playlists between 2010 and 2019, providing a diverse range of songs across genres, artists, and popularity levels.
+
+Key variables include:
+
+-   `track_name`, `track_artist`, `track_album_name` — identifiers for each song.
+
+-   `track_popularity` — the outcome variable of interest (numeric).
+
+-   `danceability`, `energy`, `valence`, `tempo`, `loudness`, `acousticness`, `speechiness`, `instrumentalness`, `liveness` — quantitative audio features describing various aspects of the sound.
+
+-   `playlist_genre`, `playlist_subgenre` — categorical variables that may help explore genre-based patterns.
+
+These variables provide a mix of quantitative and categorical predictors, enabling exploration of main effects and potential interactions.\
+\
+Data-Loading Code:
+
+```{r setup, include=FALSE}
+
+# Set global option to hide all code by default
+knitr::opts_chunk$set(echo = FALSE)
+
+library(GGally)
+
+# Install and load required packages
+# install.packages("tidytuesdayR")
+library(tidytuesdayR)
+library(tidyverse)
+
+# Load the data
+tt_data <- tidytuesdayR::tt_load("2020-01-21")
+spotify <- tt_data$spotify_songs
+
+# Preview the structure of the dataset
+glimpse(spotify)
+
+```
+
+## Initial Visualization
+
+```{r}
+
+# Reshape data for faceted plotting
+spotify_long <- spotify %>%
+  select(track_popularity, danceability, energy, valence, tempo) %>%
+  pivot_longer(cols = -track_popularity, names_to = "feature", values_to = "value")
+
+# Create faceted scatterplots
+ggplot(spotify_long, aes(x = value, y = track_popularity)) +
+  geom_point(alpha = 0.3) +
+  facet_wrap(~ feature, scales = "free_x") +
+  labs(
+    x = "Feature Value",
+    y = "Track Popularity",
+    title = "Scatterplots of Audio Features vs. Popularity"
+  ) +
+  theme_minimal()
+```
+
+The plots reveal that relationships between features and popularity are generally weak, with most variables showing a wide spread of popularity values across their ranges. For example, while there might be some upward patterns in `danceability` and `energy`, the scatter remains highly variable. `Tempo` appears particularly noisy, with no discernible trend. Additionally, there are many clusterings of songs with very low popularity scores (often near 0), which may indicate either less-played tracks or poor sampling methods used for the data set. These irregularities will be considered when preparing the data for modeling.
+
+## List of Explanatory Variables
+
+| Variable         | Description                                     |
+|------------------|-------------------------------------------------|
+| Danceability     | How suitable is a track for dancing (0-1 scale) |
+| Energy           | Intensity and activity of a song (0-1 scale)    |
+| Loudness         | Overall loudness in decibels (dB)               |
+| Speechiness      | Presence of spoken words (higher = more spoken) |
+| Acousticness     | Confidence the track is acoustic (0-1 scale)    |
+| Instrumentalness | Likelihood that the track is instrumental       |
+| Liveness         | Presence of a live audience (0-1 scale)         |
+| Valence          | Positivity or musical "happiness" (0-1 scale)   |
+| Tempo            | Estimated tempo in beats per minute (BPM)       |
+| Duration (ms)    | Duration of the track in milliseconds           |
+
+## Predictors Missing From the Data Set
+
+Although the data set includes a strong set of audio features, there are several important factors known to influence popularity that are not included in the data set. Since the goal of the project is prediction, it is useful to reflect on what additional predictors would strengthen the model if they were available.
+
+Many aspects of exposure, promotion, and pre-existing artist popularity are not captured in the current data set. These missing variables could play a substantial role in explaining popularity, independent of the audio content of the song itself.
+
+Below is a list of predictors that would be valuable for prediction but are missing from the data set:
+
+| Variable | Why It Would Help |
+|------------------------------------|------------------------------------|
+| playlist_inclusions | Number of Spotify playlists featuring the song (big impact on number of streams) |
+| artist_follower_count | Artist popularity likely drives song popularity |
+| label_type | Whether the song is released by a major label or Indie |
+| social_media_mentions | "Virality" on platforms like TikTok, Instagram, and Twitter |
+| ad_spend | Marketing budget or promotional boost |
+| release_day | Whether the song dropped on a Friday or a Holiday |
+| previous_chart_history | If the artist or song has been trending before |
+
+## Check for Multicollinearity
+
+```{r}
+# Load libraries
+library(GGally)
+library(dplyr)
+
+# Select numeric predictors
+spotify_numeric <- spotify_songs %>%
+  select(danceability, energy, loudness, speechiness, acousticness,
+         instrumentalness, liveness, valence, tempo, duration_ms)
+
+# Create pair plot
+ggpairs(spotify_numeric)
+```
+
+Some explanatory variables show strong correlations. I used the `ggpairs()` function to explore potential multicollinearity among numeric audio features. The plot revealed a strong positive correlation between `energy` and `loudness`, which makes sense musically, as louder tracks often feel more energetic. There was also a moderate positive correlation between `acousticness` and `instrumentalness`, suggesting that instrumental tracks are more likely to be acoustic. These findings indicate a small risk of multicollinearity. While it's not severe enough to remove variables at this stage, it’s something to monitor if model performance is affected or if variance inflation becomes an issue.
+
+## Check for Outliers in Predictors
+
+```{r}
+
+# Boxplot across all numeric predictors
+
+spotify_numeric %>% 
+  gather(variable, value) %>%
+  ggplot(aes(x = variable, y = value)) +
+  geom_boxplot() +
+  coord_flip() +
+  theme_minimal()
+```
+
+> Several variables contain outliers. I used boxplots to examine the range of numeric values and found that `duration_ms` contains tracks that are unusually long, possibly extended cuts, live versions, or non-music content like podcasts. Similarly, `speechiness` has extreme values close to 1, indicating tracks that are nearly fully spoken — likely interviews or spoken word recordings. These observations are not necessarily incorrect but could influence model behavior disproportionately. If modeling performance suffers, I may consider capping extreme values or excluding non-musical content.
+
+## **Histogram of Outcome Variable (Track Popularity)**
+
+```{r}
+
+# Histogram of track popularity
+
+ggplot(spotify_songs, aes(x = track_popularity)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  theme_minimal() +
+  labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Count")
+```
+
+The distribution of the outcome variable, `track_popularity`, is heavily right-skewed. Most songs have low to moderate popularity, while relatively few achieve high popularity scores near 100. This skewness suggests that popularity is not evenly distributed across songs, and a small number of tracks dominate listener attention. Because of this right-skew, a log transformation could help normalize the distribution and improve linear model performance. I will consider using `log(track_popularity + 1)` if residual plots or diagnostics suggest non-normality.
+
+## Log Transformed Model
+
+```{r}
+
+# Create a transformed version of the dataset
+spotify_transformed <- spotify_songs %>%
+  mutate(
+    log_speechiness = log1p(speechiness),
+    log_instrumentalness = log1p(instrumentalness),
+    log_duration_ms = log1p(duration_ms)
+  )
+
+# Fit a regression model using the transformed variables
+log_model <- lm(track_popularity ~ danceability + energy + loudness +
+                  log_speechiness + acousticness + log_instrumentalness +
+                  liveness + valence + tempo + log_duration_ms,
+                data = spotify_transformed)
+
+# Display the model summary
+summary(log_model)
+```
+
+To improve model stability and reduce the influence of extreme values, I applied a log transformation to three right-skewed explanatory variables: `speechiness`, `instrumentalness`, and `duration_ms`. Using the transformed variables, I refit the linear regression model to predict `track_popularity`. The results showed that the model’s fit remained similar to the original full model, with a comparable adjusted R-squared value. Several predictors remained statistically significant, including `energy`, `loudness`, and `valence`, which continued to show strong positive associations with popularity. The log-transformed variables helped mitigate the impact of extreme observations while preserving their predictive power. This transformation improves interpretability and may enhance the generalizability of the model for future prediction tasks.
+
+## Introduction of Interaction Term Danceability × Valence
+
+```{r}
+
+# Model with interaction between danceability and valence
+model_interaction <- lm(track_popularity ~ danceability * valence + 
+                          energy + loudness + speechiness + 
+                          acousticness + instrumentalness + 
+                          liveness + tempo + duration_ms + key + mode,
+                        data = spotify)
+
+# Display model summary
+summary(model_interaction)
+```
+
+To explore potential non-additive effects among predictors, I added an interaction term between `danceability` and `valence` to the regression model to test whether the effect of danceability on track popularity depends on a song’s emotional tone. I chose this interaction based on the idea that upbeat, danceable tracks might perform differently depending on whether their mood is positive or neutral. However, the interaction term was not statistically significant (p = 0.233), which suggests that the relationship between danceability and popularity does not meaningfully change based on valence. Since the interaction did not improve the model’s explanatory power, I chose not to include it in the final version of the model.
+
+## Degrees of Freedom
+
+I used 32,833 observations in my final regression model and estimated 11 coefficients, including the intercept. This left me with 32,822 degrees of freedom, representing the number of independent observations available to estimate the residual variance after accounting for the model parameters.
+
+## Code Appendix
+
+```{r}
+
+# Appendix: Code
+
+# Turn code display back on for appendix
+knitr::opts_chunk$set(echo = TRUE)
+
+---
+
+## Load Libraries and Data
+
+library(GGally)
+library(tidytuesdayR)
+library(tidyverse)
+
+# Load the data
+tt_data <- tidytuesdayR::tt_load("2020-01-21")
+spotify <- tt_data$spotify_songs
+
+# Load backup directly (optional)
+spotify_songs <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-01-21/spotify_songs.csv")
+
+glimpse(spotify)
+
+---
+
+## Initial Visualization: Scatterplots
+
+spotify_long <- spotify %>%
+  select(track_popularity, danceability, energy, valence, tempo) %>%
+  pivot_longer(cols = -track_popularity, names_to = "feature", values_to = "value")
+
+ggplot(spotify_long, aes(x = value, y = track_popularity)) +
+  geom_point(alpha = 0.3) +
+  facet_wrap(~ feature, scales = "free_x") +
+  labs(
+    x = "Feature Value",
+    y = "Track Popularity",
+    title = "Scatterplots of Audio Features vs. Popularity"
+  ) +
+  theme_minimal()
+
+---
+
+## Pair Plot: Check for Multicollinearity
+
+spotify_numeric <- spotify_songs %>%
+  select(danceability, energy, loudness, speechiness, acousticness,
+         instrumentalness, liveness, valence, tempo, duration_ms)
+
+ggpairs(spotify_numeric)
+
+---
+
+## Boxplot of Numeric Predictors
+
+spotify_numeric %>%
+  gather(variable, value) %>%
+  ggplot(aes(x = variable, y = value)) +
+  geom_boxplot() +
+  coord_flip() +
+  theme_minimal()
+
+---
+
+## Histogram of Track Popularity
+
+ggplot(spotify_songs, aes(x = track_popularity)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  theme_minimal() +
+  labs(title = "Distribution of Track Popularity", x = "Track Popularity", y = "Count")
+
+---
+
+## Full Linear Model (Untransformed)
+
+full_model <- lm(track_popularity ~ danceability + energy + loudness + speechiness +
+                   acousticness + instrumentalness + liveness + valence + tempo + duration_ms,
+                 data = spotify_songs)
+
+summary(full_model)
+
+# Adjusted R-squared
+adj_r_squared <- summary(full_model)$adj.r.squared
+cat("Adjusted R-squared:", round(adj_r_squared, 4), "\n")
+
+---
+
+## Log-Transformed Model
+
+spotify_transformed <- spotify_songs %>%
+  mutate(
+    log_speechiness = log1p(speechiness),
+    log_instrumentalness = log1p(instrumentalness),
+    log_duration_ms = log1p(duration_ms)
+  )
+
+log_model <- lm(track_popularity ~ danceability + energy + loudness +
+                  log_speechiness + acousticness + log_instrumentalness +
+                  liveness + valence + tempo + log_duration_ms,
+                data = spotify_transformed)
+
+summary(log_model)
+
+---
+
+## Stepwise Model Selection and Evaluation
+
+model_step <- step(
+  lm(track_popularity ~ danceability + energy + loudness + speechiness +
+       acousticness + instrumentalness + liveness + valence + tempo +
+       duration_ms + key + mode,
+     data = spotify),
+  direction = "both",
+  trace = FALSE
+)
+
+summary(model_step)
+
+predicted <- predict(model_step, newdata = spotify)
+actual <- spotify$track_popularity
+
+plot(predicted, actual,
+     xlab = "Predicted Popularity",
+     ylab = "Actual Popularity",
+     main = "Predicted vs. Actual Popularity")
+abline(a = 0, b = 1, col = "red")
+
+rmse <- sqrt(mean((predicted - actual)^2))
+rmse
+
+---
+
+## Residual Plot
+
+residuals <- resid(model_step)
+fitted <- fitted(model_step)
+
+plot(fitted, residuals,
+     xlab = "Fitted (Predicted) Values",
+     ylab = "Residuals",
+     main = "Residuals vs Fitted Values",
+     pch = 20, col = "steelblue")
+abline(h = 0, col = "red", lwd = 2)
+
+---
+
+## Interaction Model: Danceability × Valence
+
+model_interaction <- lm(track_popularity ~ danceability * valence + 
+                          energy + loudness + speechiness + 
+                          acousticness + instrumentalness + 
+                          liveness + tempo + duration_ms + key + mode,
+                        data = spotify)
+
+summary(model_interaction)
+```
